@@ -75,16 +75,9 @@ export default function CreateNoteScreen() {
   };
 
   const validateForm = () => {
-    // CORRECTION: Validation minimale pour éviter les erreurs
-    const newErrors: { content?: string } = {};
-    
-    // Vérifier que le contenu n'est pas vide si aucune image
-    if (!content.trim() && images.length === 0) {
-      newErrors.content = 'Veuillez ajouter du contenu ou des images à votre note';
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    // Aucune validation obligatoire - les notes peuvent être créées vides
+    setErrors({});
+    return true;
   };
 
   const handleCreate = async () => {
@@ -119,7 +112,7 @@ export default function CreateNoteScreen() {
         description: description.trim() || undefined,
         location: location.trim() || undefined,
         tags: tags.trim() || undefined,
-        content: content.trim(),
+        content: content.trim() || '', // Permettre un contenu vide
         images: validImages, // CORRECTION : Toujours passer le tableau, même vide
       };
       
@@ -364,9 +357,6 @@ export default function CreateNoteScreen() {
             returnKeyType="default"
             blurOnSubmit={false}
           />
-          {errors.content && (
-            <Text style={styles.errorText}>{errors.content}</Text>
-          )}
 
           {Platform.OS === 'web' && (
             <input
@@ -385,7 +375,7 @@ export default function CreateNoteScreen() {
         <Button
           title={loading ? "Création..." : strings.createNote}
           onPress={handleCreate}
-          disabled={false}
+          disabled={loading}
           style={styles.footerButton}
         />
       </View>

@@ -94,12 +94,9 @@ export default function EditNoteScreen() {
 
 
   const validateForm = () => {
-    // Validation minimale pour éviter les erreurs
-    const newErrors: { title?: string } = {};
-    
-    // Le titre peut être vide, il sera généré automatiquement
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    // Aucune validation obligatoire - les notes peuvent être vides
+    setErrors({});
+    return true;
   };
 
   const handleSave = async () => {
@@ -122,7 +119,7 @@ export default function EditNoteScreen() {
         description: description.trim() || undefined,
         location: location.trim() || undefined,
         tags: tags.trim() || undefined,
-        content: content.trim(),
+        content: content.trim() || '', // Permettre un contenu vide
         images: validImages, // CORRECTION : Toujours passer le tableau
       });
 
