@@ -1517,4 +1517,3 @@ const createStyles = (theme: any) => StyleSheet.create({
     marginBottom: 16,
   },
 });
-});
