@@ -179,27 +179,27 @@ export default function EditNoteScreen() {
     const { files } = target;
     
     if (files && files.length > 0) {
-      // Vérifications de sécurité
+      // CORRECTION : Vérifications plus permissives
       const totalSize = Array.from(files).reduce((sum, file) => sum + file.size, 0);
       const totalSizeMB = totalSize / 1024 / 1024;
       const newTotalImages = images.length + files.length;
       
-      if (totalSizeMB > 50) {
+      if (totalSizeMB > 100) { // Augmenté de 50MB à 100MB
         console.warn('⚠️ Taille totale trop importante:', totalSizeMB.toFixed(2), 'MB');
         Alert.alert(
           'Images trop volumineuses',
-          `La taille totale des images (${totalSizeMB.toFixed(1)}MB) dépasse la limite de 50MB.`,
+          `La taille totale des images (${totalSizeMB.toFixed(1)}MB) dépasse la limite de 100MB.`,
           [{ text: 'OK' }]
         );
         target.value = '';
         return;
       }
       
-      if (newTotalImages > 20) {
-        console.warn('⚠️ Limite d\'images atteinte (20 max)');
+      if (newTotalImages > 50) { // Augmenté de 20 à 50 images max
+        console.warn('⚠️ Limite d\'images atteinte (50 max)');
         Alert.alert(
           'Limite d\'images atteinte',
-          'Vous ne pouvez pas ajouter plus de 20 images par note.',
+          'Vous ne pouvez pas ajouter plus de 50 images par note.',
           [{ text: 'OK' }]
         );
         target.value = '';
@@ -207,34 +207,46 @@ export default function EditNoteScreen() {
       }
       
       try {
-        // CORRECTION : Traiter les images une par une avec compression
+        // CORRECTION : Traitement par lots pour éviter les timeouts
         const processedImages: string[] = [];
+        const batchSize = 3; // Traiter 3 images à la fois
         
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
+        for (let i = 0; i < files.length; i += batchSize) {
+          const batch = Array.from(files).slice(i, i + batchSize);
+          console.log(`📸 Traitement batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(files.length/batchSize)}`);
           
-          if (!file || !file.type.startsWith('image/')) {
-            console.warn(`⚠️ Fichier ${i} ignoré (pas une image):`, file?.type);
-            continue;
-          }
-          
-          try {
-            console.log(`📸 Traitement image ${i + 1}/${files.length}:`, file.name);
-            const compressedImage = await processImage(file);
+          const batchPromises = batch.map(async (file, batchIndex) => {
+            const globalIndex = i + batchIndex;
             
-            if (compressedImage && validateImageBase64(compressedImage)) {
-              processedImages.push(compressedImage);
-              console.log(`✅ Image ${i + 1} traitée et validée avec succès`);
-            } else {
-              console.error(`❌ Image ${i + 1} invalide après traitement`);
+            if (!file || !file.type.startsWith('image/')) {
+              console.warn(`⚠️ Fichier ${globalIndex} ignoré (pas une image):`, file?.type);
+              return null;
             }
             
-            // Pause pour éviter de bloquer l'UI
-            if (i < files.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, 100));
+            try {
+              console.log(`📸 Traitement image ${globalIndex + 1}/${files.length}:`, file.name);
+              const compressedImage = await processImage(file);
+              
+              if (compressedImage && compressedImage.length > 50) {
+                console.log(`✅ Image ${globalIndex + 1} traitée avec succès`);
+                return compressedImage;
+              } else {
+                console.error(`❌ Image ${globalIndex + 1} invalide après traitement`);
+                return null;
+              }
+            } catch (error) {
+              console.error(`❌ Erreur traitement image ${globalIndex + 1}:`, error);
+              return null;
             }
-          } catch (error) {
-            console.error(`❌ Erreur traitement image ${i + 1}:`, error);
+          });
+          
+          const batchResults = await Promise.all(batchPromises);
+          const validBatchImages = batchResults.filter(img => img !== null) as string[];
+          processedImages.push(...validBatchImages);
+          
+          // Pause entre les batches
+          if (i + batchSize < files.length) {
+            await new Promise(resolve => setTimeout(resolve, 200));
           }
         }
         

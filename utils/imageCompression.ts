@@ -218,14 +218,13 @@ export function validateImageBase64(base64: string): boolean {
     return false;
   }
 
-  // Vérifier le format base64 d'image
-  if (!base64.startsWith('data:image/')) {
+  // CORRECTION : Validation plus permissive pour éviter les rejets
+  if (!base64.includes('data:image/') && !base64.startsWith('data:image/')) {
     return false;
   }
 
-  // Vérifier qu'il y a des données après l'en-tête
-  const commaIndex = base64.indexOf(',');
-  if (commaIndex === -1 || base64.length - commaIndex < 100) {
+  // Vérifier qu'il y a des données suffisantes
+  if (base64.length < 50) {
     return false;
   }
 

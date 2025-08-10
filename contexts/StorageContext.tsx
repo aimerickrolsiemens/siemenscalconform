@@ -919,27 +919,16 @@ export function StorageProvider({ children }: StorageProviderProps) {
       contentLength: noteData.content?.length || 0
     });
     
-    // CORRECTION MAJEURE : Préserver TOUTES les images sans filtrage excessif
+    // CORRECTION : Préserver TOUTES les images valides sans limite artificielle
     let finalImages: string[] | undefined = undefined;
     if (noteData.images && Array.isArray(noteData.images) && noteData.images.length > 0) {
-      // Validation minimale : seulement vérifier que c'est une chaîne non vide qui commence par data:image/
-      finalImages = noteData.images.filter(img => {
-        const isValid = img && 
-          typeof img === 'string' && 
-          img.trim() !== '' && 
-          img.startsWith('data:image/');
-        
-        if (!isValid) {
-          console.warn('⚠️ Image invalide filtrée lors de la création:', img?.substring(0, 30));
-        }
-        return isValid;
-      });
+      // Validation simple sans filtrage excessif
+      finalImages = noteData.images.filter(img => img && typeof img === 'string' && img.length > 50);
       
       console.log(`📸 Images validées pour création: ${finalImages.length}/${noteData.images.length}`);
       
-      // CORRECTION : Garder le tableau même s'il est vide pour éviter la perte
+      // Garder le tableau même s'il est vide
       if (finalImages.length === 0) {
-        console.log('📸 Aucune image valide mais conservation du tableau vide');
         finalImages = [];
       }
     }
@@ -985,7 +974,7 @@ export function StorageProvider({ children }: StorageProviderProps) {
       return null;
     }
     
-    // CORRECTION MAJEURE: Gestion explicite et claire des images
+    // CORRECTION : Gestion robuste des images sans limite artificielle
     let finalImages = notes[noteIndex].images || []; // Toujours partir d'un tableau
     
     console.log('📸 Images actuelles dans la note:', finalImages.length);
@@ -1000,17 +989,8 @@ export function StorageProvider({ children }: StorageProviderProps) {
         console.log('📸 Suppression explicite des images');
       } else if (Array.isArray(updates.images)) {
         // Remplacement ou ajout d'images
-        const validImages = updates.images.filter(img => {
-          const isValid = img && 
-            typeof img === 'string' && 
-            img.trim() !== '' && 
-            img.startsWith('data:image/');
-          
-          if (!isValid) {
-            console.warn('⚠️ Image invalide filtrée lors de la mise à jour:', img?.substring(0, 30));
-          }
-          return isValid;
-        });
+        // Validation simple sans filtrage excessif
+        const validImages = updates.images.filter(img => img && typeof img === 'string' && img.length > 50);
         
         console.log(`📸 Images validées pour mise à jour: ${validImages.length}/${updates.images.length}`);
         finalImages = validImages; // Remplacer complètement les images
@@ -1061,8 +1041,17 @@ export function StorageProvider({ children }: StorageProviderProps) {
       const dataSizeKB = (dataString.length / 1024).toFixed(2);
       console.log('📊 StorageContext.saveNotes - Taille des données:', dataSizeKB, 'KB');
       
-      // Sauvegarder avec gestion d'erreur robuste
-      await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(newNotes));
+      // CORRECTION : Gestion robuste pour les gros volumes de données
+      const dataSizeMB = parseFloat(dataSizeKB) / 1024;
+      
+      if (dataSizeMB > 5) {
+        console.log('📦 Données volumineuses détectées, sauvegarde par chunks');
+        await saveNotesInChunks(newNotes);
+      } else {
+        console.log('💾 Sauvegarde normale des notes');
+        await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(newNotes));
+      }
+      
       setNotes(newNotes);
       console.log('✅ StorageContext.saveNotes - Sauvegarde AsyncStorage réussie');
       
@@ -1081,6 +1070,61 @@ export function StorageProvider({ children }: StorageProviderProps) {
       }
     } catch (error) {
       console.error('❌ StorageContext.saveNotes - Erreur sauvegarde:', error);
+      
+      // CORRECTION : Tentative de sauvegarde par chunks en cas d'erreur
+      try {
+        console.log('🔄 Tentative de sauvegarde par chunks après erreur');
+        await saveNotesInChunks(newNotes);
+        setNotes(newNotes);
+        console.log('✅ Sauvegarde par chunks réussie après erreur');
+      } catch (chunkError) {
+        console.error('❌ Erreur sauvegarde par chunks:', chunkError);
+        throw new Error('Impossible de sauvegarder les notes. Données trop volumineuses.');
+      }
+    }
+  };
+
+  // NOUVELLE FONCTION : Sauvegarde par chunks pour les gros volumes
+  const saveNotesInChunks = async (notesToSave: Note[]) => {
+    try {
+      console.log('📦 Début sauvegarde par chunks de', notesToSave.length, 'notes');
+      
+      // Diviser les notes en chunks de 10 notes maximum
+      const chunkSize = 10;
+      const chunks: Note[][] = [];
+      
+      for (let i = 0; i < notesToSave.length; i += chunkSize) {
+        chunks.push(notesToSave.slice(i, i + chunkSize));
+      }
+      
+      console.log(`📦 Division en ${chunks.length} chunks de ${chunkSize} notes max`);
+      
+      // Sauvegarder chaque chunk
+      const savePromises = chunks.map((chunk, index) => 
+        AsyncStorage.setItem(`${STORAGE_KEYS.NOTES}_chunk_${index}`, JSON.stringify(chunk))
+      );
+      
+      await Promise.all(savePromises);
+      
+      // Sauvegarder les métadonnées des chunks
+      const chunksMetadata = {
+        totalChunks: chunks.length,
+        totalNotes: notesToSave.length,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      await AsyncStorage.setItem(`${STORAGE_KEYS.NOTES}_chunks_meta`, JSON.stringify(chunksMetadata));
+      
+      // Supprimer l'ancienne clé monolithique si elle existe
+      try {
+        await AsyncStorage.removeItem(STORAGE_KEYS.NOTES);
+      } catch (removeError) {
+        console.warn('⚠️ Impossible de supprimer l\'ancienne clé notes:', removeError);
+      }
+      
+      console.log('✅ Sauvegarde par chunks terminée avec succès');
+    } catch (error) {
+      console.error('❌ Erreur sauvegarde par chunks:', error);
       throw error;
     }
   };
