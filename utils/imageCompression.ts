@@ -215,19 +215,27 @@ function calculateDimensions(
  */
 export function validateImageBase64(base64: string): boolean {
   if (!base64 || typeof base64 !== 'string') {
+    console.log('❌ Image invalide: pas une string ou vide');
     return false;
   }
 
-  // CORRECTION : Validation plus permissive pour éviter les rejets
-  if (!base64.includes('data:image/') && !base64.startsWith('data:image/')) {
+  // Vérifier le format data URL
+  if (!base64.startsWith('data:image/')) {
+    console.log('❌ Image invalide: ne commence pas par data:image/');
     return false;
   }
 
   // Vérifier qu'il y a des données suffisantes
   if (base64.length < 50) {
+    console.log('❌ Image invalide: trop courte (<50 caractères)');
     return false;
   }
 
+  // Vérifier qu'il y a une virgule (séparateur header/data)
+  if (!base64.includes(',')) {
+    console.log('❌ Image invalide: pas de virgule séparatrice');
+    return false;
+  }
   return true;
 }
 

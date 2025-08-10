@@ -69,56 +69,20 @@ interface StorageContextType {
   removeQuickCalcHistoryItem: (itemId: string) => Promise<void>;
   getQuickCalcHistory: () => Promise<QuickCalcHistoryItem[]>;
   
-  // Actions pour les notes
-  createNote: (noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Note>;
-  updateNote: (id: string, updates: Partial<Note>) => Promise<Note | null>;
-  deleteNote: (id: string) => Promise<boolean>;
-  
-  // Recherche
-  searchShutters: (query: string) => SearchResult[];
-  
-  // Utilitaires
-  clearAllData: () => Promise<void>;
-  getStorageInfo: () => { projectsCount: number; totalShutters: number; storageSize: string };
-  getProjects: () => Promise<Project[]>;
-  getFavoriteBuildings: () => Promise<string[]>;
-  getFavoriteZones: () => Promise<string[]>;
-  getFavoriteShutters: () => Promise<string[]>;
-  getFavoriteNotes: () => Promise<string[]>;
-  
-  // Import/Export
-  importProject: (project: Project, relatedNotes?: Note[]) => Promise<boolean>;
-}
-
-const StorageContext = createContext<StorageContextType | undefined>(undefined);
-
-// Clés de stockage simplifiées
-const STORAGE_KEYS = {
-  PROJECTS: 'SIEMENS_PROJECTS',
-  FAVORITE_PROJECTS: 'SIEMENS_FAV_PROJECTS',
-  FAVORITE_BUILDINGS: 'SIEMENS_FAV_BUILDINGS',
-  FAVORITE_ZONES: 'SIEMENS_FAV_ZONES',
-  FAVORITE_SHUTTERS: 'SIEMENS_FAV_SHUTTERS',
-  FAVORITE_NOTES: 'SIEMENS_FAV_NOTES',
-  QUICK_CALC_HISTORY: 'SIEMENS_CALC_HISTORY',
-  NOTES: 'SIEMENS_NOTES',
-};
-
-// Fonction utilitaire pour générer un ID unique
-function generateUniqueId(): string {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substr(2, 9);
-  return `${timestamp}_${random}`;
-}
-
-// Fonction utilitaire sécurisée pour AsyncStorage
-async function safeStorageOperation<T>(
-  operation: () => Promise<T>,
-  fallback: T,
-  operationName: string
-): Promise<T> {
-  try {
-    return await operation();
+    if (notesData && notesData !== 'undefined' && notesData !== 'null') {
+      const parsedNotes = JSON.parse(notesData);
+      const processedNotes = Array.isArray(parsedNotes) ? parsedNotes.map((note: any) => ({
+        ...note,
+        createdAt: new Date(note.createdAt || Date.now()),
+        updatedAt: new Date(note.updatedAt || Date.now()),
+        images: note.images || []
+      })) : [];
+      setNotes(processedNotes);
+      console.log(`✅ ${processedNotes.length} notes chargées`);
+    } else {
+      console.log('📝 Aucune note existante');
+      setNotes([]);
+    }
   } catch (error) {
     console.warn(`Storage ${operationName} failed:`, error);
     return fallback;
@@ -919,17 +883,15 @@ export function StorageProvider({ children }: StorageProviderProps) {
       contentLength: noteData.content?.length || 0
     });
     
-    // CORRECTION : Préserver TOUTES les images valides sans limite artificielle
+    // Préserver les images valides
     let finalImages: string[] | undefined = undefined;
     if (noteData.images && Array.isArray(noteData.images) && noteData.images.length > 0) {
-      // Validation simple sans filtrage excessif
-      finalImages = noteData.images.filter(img => img && typeof img === 'string' && img.length > 50);
+      finalImages = noteData.images.filter(img => validateImageBase64(img));
       
       console.log(`📸 Images validées pour création: ${finalImages.length}/${noteData.images.length}`);
       
-      // Garder le tableau même s'il est vide
       if (finalImages.length === 0) {
-        finalImages = [];
+        finalImages = undefined;
       }
     }
     
@@ -974,7 +936,7 @@ export function StorageProvider({ children }: StorageProviderProps) {
       return null;
     }
     
-    // CORRECTION : Gestion robuste des images sans limite artificielle
+    // Gestion des images
     let finalImages = notes[noteIndex].images || []; // Toujours partir d'un tableau
     
     console.log('📸 Images actuelles dans la note:', finalImages.length);
@@ -985,15 +947,14 @@ export function StorageProvider({ children }: StorageProviderProps) {
       
       if (updates.images === undefined || updates.images === null) {
         // Suppression explicite
-        finalImages = [];
+        finalImages = undefined;
         console.log('📸 Suppression explicite des images');
       } else if (Array.isArray(updates.images)) {
         // Remplacement ou ajout d'images
-        // Validation simple sans filtrage excessif
-        const validImages = updates.images.filter(img => img && typeof img === 'string' && img.length > 50);
+        const validImages = updates.images.filter(img => validateImageBase64(img));
         
         console.log(`📸 Images validées pour mise à jour: ${validImages.length}/${updates.images.length}`);
-        finalImages = validImages; // Remplacer complètement les images
+        finalImages = validImages.length > 0 ? validImages : undefined;
         console.log('📸 Remplacement complet des images par les nouvelles');
       }
     } else {
@@ -1003,7 +964,7 @@ export function StorageProvider({ children }: StorageProviderProps) {
     const updatedNote = { 
       ...notes[noteIndex], 
       ...updates, 
-      images: finalImages.length > 0 ? finalImages : undefined,
+      images: finalImages,
       updatedAt: new Date() 
     };
     
@@ -1012,7 +973,7 @@ export function StorageProvider({ children }: StorageProviderProps) {
     
     try {
       await saveNotes(newNotes);
-      console.log('✅ StorageContext.updateNote - Note mise à jour avec succès, images finales:', finalImages.length);
+      console.log('✅ StorageContext.updateNote - Note mise à jour avec succès, images finales:', finalImages?.length || 0);
       return updatedNote;
     } catch (saveError) {
       console.error('❌ StorageContext.updateNote - Erreur sauvegarde:', saveError);
@@ -1023,11 +984,18 @@ export function StorageProvider({ children }: StorageProviderProps) {
   const deleteNote = async (id: string): Promise<boolean> => {
     const noteIndex = notes.findIndex(n => n.id === id);
     if (noteIndex === -1) {
+      console.error('❌ Note non trouvée pour suppression:', id);
       return false;
     }
     
     const newNotes = notes.filter(n => n.id !== id);
-    await saveNotes(newNotes);
+    try {
+      await saveNotes(newNotes);
+      console.log('✅ Note supprimée avec succès:', id);
+    } catch (error) {
+      console.error('❌ Erreur lors de la suppression de la note:', error);
+      throw error;
+    }
     return true;
   };
 
@@ -1036,24 +1004,11 @@ export function StorageProvider({ children }: StorageProviderProps) {
     try {
       console.log('💾 StorageContext.saveNotes - Début sauvegarde de', newNotes.length, 'notes');
       
-      // Calculer la taille totale des données
-      const dataString = JSON.stringify(newNotes);
-      const dataSizeKB = (dataString.length / 1024).toFixed(2);
-      console.log('📊 StorageContext.saveNotes - Taille des données:', dataSizeKB, 'KB');
-      
-      // CORRECTION : Gestion robuste pour les gros volumes de données
-      const dataSizeMB = parseFloat(dataSizeKB) / 1024;
-      
-      if (dataSizeMB > 5) {
-        console.log('📦 Données volumineuses détectées, sauvegarde par chunks');
-        await saveNotesInChunks(newNotes);
-      } else {
-        console.log('💾 Sauvegarde normale des notes');
-        await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(newNotes));
-      }
+      // Sauvegarde directe simplifiée
+      await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(newNotes));
       
       setNotes(newNotes);
-      console.log('✅ StorageContext.saveNotes - Sauvegarde AsyncStorage réussie');
+      console.log('✅ Notes sauvegardées avec succès');
       
       // Cache dans le Service Worker pour l'accès hors ligne
       if (Platform.OS === 'web' && 'serviceWorker' in navigator) {
@@ -1063,68 +1018,13 @@ export function StorageProvider({ children }: StorageProviderProps) {
             headers: { 'Content-Type': 'application/json' }
           });
           await cache.put('/api/notes', response);
-          console.log('💾 StorageContext.saveNotes - Cache Service Worker mis à jour');
+          console.log('💾 Cache Service Worker mis à jour');
         } catch (error) {
-          console.warn('⚠️ StorageContext.saveNotes - Erreur cache Service Worker:', error);
+          console.warn('⚠️ Erreur cache Service Worker:', error);
         }
       }
     } catch (error) {
-      console.error('❌ StorageContext.saveNotes - Erreur sauvegarde:', error);
-      
-      // CORRECTION : Tentative de sauvegarde par chunks en cas d'erreur
-      try {
-        console.log('🔄 Tentative de sauvegarde par chunks après erreur');
-        await saveNotesInChunks(newNotes);
-        setNotes(newNotes);
-        console.log('✅ Sauvegarde par chunks réussie après erreur');
-      } catch (chunkError) {
-        console.error('❌ Erreur sauvegarde par chunks:', chunkError);
-        throw new Error('Impossible de sauvegarder les notes. Données trop volumineuses.');
-      }
-    }
-  };
-
-  // NOUVELLE FONCTION : Sauvegarde par chunks pour les gros volumes
-  const saveNotesInChunks = async (notesToSave: Note[]) => {
-    try {
-      console.log('📦 Début sauvegarde par chunks de', notesToSave.length, 'notes');
-      
-      // Diviser les notes en chunks de 10 notes maximum
-      const chunkSize = 10;
-      const chunks: Note[][] = [];
-      
-      for (let i = 0; i < notesToSave.length; i += chunkSize) {
-        chunks.push(notesToSave.slice(i, i + chunkSize));
-      }
-      
-      console.log(`📦 Division en ${chunks.length} chunks de ${chunkSize} notes max`);
-      
-      // Sauvegarder chaque chunk
-      const savePromises = chunks.map((chunk, index) => 
-        AsyncStorage.setItem(`${STORAGE_KEYS.NOTES}_chunk_${index}`, JSON.stringify(chunk))
-      );
-      
-      await Promise.all(savePromises);
-      
-      // Sauvegarder les métadonnées des chunks
-      const chunksMetadata = {
-        totalChunks: chunks.length,
-        totalNotes: notesToSave.length,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      await AsyncStorage.setItem(`${STORAGE_KEYS.NOTES}_chunks_meta`, JSON.stringify(chunksMetadata));
-      
-      // Supprimer l'ancienne clé monolithique si elle existe
-      try {
-        await AsyncStorage.removeItem(STORAGE_KEYS.NOTES);
-      } catch (removeError) {
-        console.warn('⚠️ Impossible de supprimer l\'ancienne clé notes:', removeError);
-      }
-      
-      console.log('✅ Sauvegarde par chunks terminée avec succès');
-    } catch (error) {
-      console.error('❌ Erreur sauvegarde par chunks:', error);
+      console.error('❌ Erreur sauvegarde notes:', error);
       throw error;
     }
   };
@@ -1163,7 +1063,15 @@ export function StorageProvider({ children }: StorageProviderProps) {
   // Utilitaires
   const clearAllData = async () => {
     try {
-      await AsyncStorage.multiRemove(Object.values(STORAGE_KEYS));
+      // Nettoyer toutes les clés, y compris les chunks potentiels
+      const allKeys = await AsyncStorage.getAllKeys();
+      const keysToRemove = allKeys.filter(key => 
+        key.startsWith('SIEMENS_') || 
+        Object.values(STORAGE_KEYS).includes(key)
+      );
+      
+      console.log('🗑️ Suppression de', keysToRemove.length, 'clés de stockage');
+      await AsyncStorage.multiRemove(keysToRemove);
       
       setProjects([]);
       setFavoriteProjectsState([]);
@@ -1173,6 +1081,8 @@ export function StorageProvider({ children }: StorageProviderProps) {
       setFavoriteNotesState([]);
       setQuickCalcHistoryState([]);
       setNotes([]);
+      
+      console.log('✅ Toutes les données supprimées');
     } catch (error) {
       console.warn('Erreur suppression données:', error);
       throw error;
